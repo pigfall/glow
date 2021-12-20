@@ -16,6 +16,73 @@ pub struct Context {
 }
 
 impl Context {
+    pub unsafe fn from_loader_function_with_version_parse<F,P>(parse_version: P,mut loader_function: F) -> Result<Self,Box<dyn std::error::Error>>
+    where
+        F: FnMut(&str) -> *const std::os::raw::c_void,
+        P: Fn(&str) -> Result<Version,Box<dyn std::error::Error>>,
+    {
+        // Note(Lokathor): This is wildly inefficient, because the loader_function
+        // is doubtlessly just going to allocate the `&str` we pass into a new `CString`
+        // so that it can pass that `*const c_char` off to the OS's actual loader.
+        // However, this is the best we can do without changing the outer function
+        // signature into something that's less alloc crazy.
+        let raw: native_gl::GlFns =
+            native_gl::GlFns::load_with(|p: *const std::os::raw::c_char| {
+                let c_str = std::ffi::CStr::from_ptr(p);
+                loader_function(c_str.to_str().unwrap()) as *mut std::os::raw::c_void
+            });
+
+        // Retrieve and parse `GL_VERSION`
+        let raw_string = raw.GetString(VERSION);
+        let raw_version = std::ffi::CStr::from_ptr(raw_string as *const native_gl::GLchar)
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let version = Version::parse(&raw_version).
+            or_else(
+                |e|{
+                    parse_version(&raw_version)
+                }
+            )?;
+
+        // Setup extensions and constants after the context has been built
+        let mut context = Self {
+            raw,
+            extensions: HashSet::new(),
+            constants: Constants::default(),
+            version,
+        };
+
+        // Use core-only functions to populate extension list
+        if (context.version >= Version::new(3, 0, None, String::from("")))
+            || (context.version >= Version::new_embedded(3, 0, String::from("")))
+        {
+            let num_extensions = context.get_parameter_i32(NUM_EXTENSIONS);
+            for i in 0..num_extensions {
+                let extension_name = context.get_parameter_indexed_string(EXTENSIONS, i as u32);
+                context.extensions.insert(extension_name);
+            }
+        } else {
+            // Fallback
+            context.extensions.extend(
+                context
+                    .get_parameter_string(EXTENSIONS)
+                    .split(' ')
+                    .map(|s| s.to_string()),
+            );
+        };
+
+        // After the extensions are known, we can populate constants (including
+        // constants that depend on extensions being enabled)
+        context.constants.max_label_length = if context.supports_debug() {
+            context.get_parameter_i32(MAX_LABEL_LENGTH)
+        } else {
+            0
+        };
+
+        Ok(context)
+    }
+
     pub unsafe fn from_loader_function<F>(mut loader_function: F) -> Self
     where
         F: FnMut(&str) -> *const std::os::raw::c_void,
