@@ -2,6 +2,7 @@ use super::*;
 use crate::{gl46 as native_gl, version::Version};
 use std::ffi::CStr;
 use std::{collections::HashSet, ffi::CString, num::NonZeroU32};
+use log::info;
 
 #[derive(Default)]
 struct Constants {
@@ -31,19 +32,25 @@ impl Context {
                 let c_str = std::ffi::CStr::from_ptr(p);
                 loader_function(c_str.to_str().unwrap()) as *mut std::os::raw::c_void
             });
+        info!("gl functions loaded {:?}",raw);
 
+        info!("getting gl version");
         // Retrieve and parse `GL_VERSION`
         let raw_string = raw.GetString(VERSION);
-        let raw_version = std::ffi::CStr::from_ptr(raw_string as *const native_gl::GLchar)
-            .to_str()
-            .unwrap()
-            .to_owned();
+        info!("gl version {:?}",raw_string);
+        //let raw_version = std::ffi::CStr::from_ptr(raw_string as *const native_gl::GLchar)
+        //    .to_str()
+        //    .unwrap()
+        //    .to_owned();
+        let raw_version ="";
         let version = Version::parse(&raw_version).
             or_else(
                 |e|{
                     parse_version(&raw_version)
                 }
             )?;
+
+        info!("version {:?}",version);
 
         // Setup extensions and constants after the context has been built
         let mut context = Self {
@@ -53,24 +60,33 @@ impl Context {
             version,
         };
 
+        info!("Context {:?}",context);
+
         // Use core-only functions to populate extension list
         if (context.version >= Version::new(3, 0, None, String::from("")))
             || (context.version >= Version::new_embedded(3, 0, String::from("")))
         {
+            info!("branchA");
             let num_extensions = context.get_parameter_i32(NUM_EXTENSIONS);
             for i in 0..num_extensions {
                 let extension_name = context.get_parameter_indexed_string(EXTENSIONS, i as u32);
                 context.extensions.insert(extension_name);
             }
         } else {
-            // Fallback
+            info!("branchB");
+            info!("{:?}",context.get_parameter_string(EXTENSIONS));
+            
+            // Fallback TODO
             context.extensions.extend(
                 context
                     .get_parameter_string(EXTENSIONS)
                     .split(' ')
-                    .map(|s| s.to_string()),
+                    .map(|s|{info!("Debug handle extenstion");s.to_string()} ),
             );
+            info!("branchB over");
         };
+
+        info!("context getted");
 
         // After the extensions are known, we can populate constants (including
         // constants that depend on extensions being enabled)
