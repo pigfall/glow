@@ -10,7 +10,7 @@ struct Constants {
 }
 
 pub struct Context {
-    raw: native_gl::GlFns,
+    pub raw: native_gl::GlFns,
     extensions: HashSet<String>,
     constants: Constants,
     version: Version,
